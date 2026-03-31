@@ -292,7 +292,7 @@ function App() {
     const rangeKm = toKm(trackForm.range, unit)
     // Convert knots to km/h (1 knot = 1.852 km/h)
     const speedKmh = trackForm.speed * 1.852
-    const delta = polarToXY(rangeKm, trackForm.bearing)
+    const delta = polarToXY(trackForm.bearing, rangeKm)
     const x = delta.x
     const y = delta.y
 
@@ -326,8 +326,8 @@ function App() {
 
   const updateTrack = () => {
     if (selectedTrackId === null) return
-    const newX = polarToXY(toKm(trackForm.range, unit), trackForm.bearing).x
-    const newY = polarToXY(toKm(trackForm.range, unit), trackForm.bearing).y
+    const newX = polarToXY(trackForm.bearing, toKm(trackForm.range, unit)).x
+    const newY = polarToXY(trackForm.bearing, toKm(trackForm.range, unit)).y
     // Convert knots to km/h (1 knot = 1.852 km/h)
     const speedKmh = trackForm.speed * 1.852
     setTracks((prev) =>
@@ -366,7 +366,7 @@ function App() {
     setTrackForm({
       label: track.label,
       height: track.height,
-      speed: track.speedKmh,
+      speed: track.speedKmh / 1.852, // convert back to knots for UI
       heading: track.heading,
       bearing: track.bearing,
       range: fromKm(track.rangeKm, unit),
