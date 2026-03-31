@@ -76,15 +76,24 @@ const classificationColor = (classification: Classification) => {
   }
 }
 
-const createApp6Symbol = (classification: Classification) => {
-  const color = classificationColor(classification)
-  const html = `<div style="width: 20px; height: 20px; background-color: ${color}; border: 2px solid white; border-radius: 50%; box-shadow: 0 0 4px rgba(0,0,0,0.8);"></div>`
+const createTrackMarker = (track: Track) => {
+  const color = classificationColor(track.classification)
+  const symbolHtml = `<div style="width: 20px; height: 20px; background-color: ${color}; border: 2px solid white; border-radius: 50%; box-shadow: 0 0 4px rgba(0,0,0,0.8); margin: 0 auto;"></div>`
+  const remarksHtml = track.remarks ? `<div>Remarks: ${track.remarks}</div>` : ''
+  const labelHtml = `
+    <div style="background: none; color: black; padding: 8px 6px; border-radius: 4px; margin-top: 2px; font-size: 14px; text-align: center; line-height: 1.4;">
+      ${remarksHtml}
+      <div><strong>${track.label}</strong></div>
+      <div>Height: ${track.height} ft</div>
+    </div>
+  `
+  const html = `<div style="display: flex; flex-direction: column; align-items: center;">${symbolHtml}${labelHtml}</div>`
 
   return L.divIcon({
-    className: 'app6-symbol',
+    className: 'track-marker',
     html: html,
-    iconAnchor: [10, 10],
-    iconSize: [20, 20],
+    iconAnchor: [10, 60], // Adjust anchor to account for label height
+    iconSize: [20, 100], // Adjust size to fit symbol + label
   })
 }
 
@@ -101,7 +110,7 @@ function App() {
     heading: 0,
     bearing: 0,
     range: 10,
-    classification: 'neutral' as Classification,
+    classification: 'Neutral' as Classification,
     remarks: '',
   })
 
@@ -247,7 +256,7 @@ function App() {
 
       L.polyline([current, predicted], { color: '#f80', dashArray: '8,6', weight: 2 }).addTo(overlay)
 
-      const marker = L.marker(current, { icon: createApp6Symbol(t.classification) })
+      const marker = L.marker(current, { icon: createTrackMarker(t) })
       marker
         .bindPopup(`${t.label} | h=${t.height} ft | ${fromKm(t.rangeKm, unit).toFixed(1)} ${unit}/ ${t.bearing.toFixed(1)}° | ${t.classification}`)
         .on('click', () => showTrackHistory(t))
@@ -310,7 +319,7 @@ function App() {
         x,
         y,
         history: [{ x, y }],
-        remarks: '',
+        remarks: trackForm.remarks,
       },
     ])
     setTrackLog((prev) => [
@@ -322,16 +331,30 @@ function App() {
       ...prev,
     ])
     setNextTrackId((v) => v + 1)
+    // Reset form after adding
+    setTrackForm({
+      label: 'T1',
+      height: 0,
+      speed: 100,
+      heading: 0,
+      bearing: 0,
+      range: 10,
+      classification: 'Neutral' as Classification,
+      remarks: '',
+    })
   }
 
   const updateTrack = () => {
     if (selectedTrackId === null) return
-    const newX = polarToXY(trackForm.bearing, toKm(trackForm.range, unit)).x
-    const newY = polarToXY(trackForm.bearing, toKm(trackForm.range, unit)).y
+    console.log('Updating track', selectedTrackId, 'with form data:', trackForm)
     // Convert knots to km/h (1 knot = 1.852 km/h)
     const speedKmh = trackForm.speed * 1.852
-    setTracks((prev) =>
-      prev.map((t) =>
+    const rangeKm = toKm(trackForm.range, unit)
+    const delta = polarToXY(trackForm.bearing, rangeKm)
+    const x = delta.x
+    const y = delta.y
+    setTracks((prev) => {
+      const updated = prev.map((t) =>
         t.id === selectedTrackId
           ? {
               ...t,
@@ -340,16 +363,19 @@ function App() {
               speedKmh,
               heading: trackForm.heading,
               bearing: trackForm.bearing,
+              rangeKm,
+              x,
+              y,
               classification: trackForm.classification,
-              rangeKm: toKm(trackForm.range, unit),
-              x: newX,
-              y: newY,
-              history: [...t.history, { x: newX, y: newY }].slice(-120),
               remarks: trackForm.remarks || t.remarks,
+              history: [{ x, y }], // Reset history on position change
             }
           : t,
-      ),
-    )
+      )
+      const updatedTrack = updated.find(t => t.id === selectedTrackId)
+      console.log('Updated track result:', updatedTrack)
+      return updated
+    })
     setTrackLog((prev) => [
       {
         timestamp: new Date().toISOString(),
@@ -359,9 +385,21 @@ function App() {
       ...prev,
     ])
     setSelectedTrackId(null)
+    // Reset form after update
+    setTrackForm({
+      label: 'T1',
+      height: 0,
+      speed: 100,
+      heading: 0,
+      bearing: 0,
+      range: 10,
+      classification: 'Neutral' as Classification,
+      remarks: '',
+    })
   }
 
   const selectTrackToEdit = (track: Track) => {
+    console.log('Selecting track to edit:', track)
     setSelectedTrackId(track.id)
     setTrackForm({
       label: track.label,
@@ -370,6 +408,11 @@ function App() {
       heading: track.heading,
       bearing: track.bearing,
       range: fromKm(track.rangeKm, unit),
+      classification: track.classification,
+      remarks: track.remarks,
+    })
+    console.log('Form set to:', {
+      label: track.label,
       classification: track.classification,
       remarks: track.remarks,
     })
