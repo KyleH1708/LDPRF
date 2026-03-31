@@ -20,6 +20,7 @@ type Track = {
   x: number // east km from bullseye
   y: number // north km from bullseye
   history: Array<{ x: number; y: number }>
+  remarks: string
 }
 
 type SAM = {
@@ -101,12 +102,13 @@ function App() {
 
   const [trackForm, setTrackForm] = useState({
     label: 'T1',
-    height: 15000,
-    speed: 450,
+    height: 0,
+    speed: 0,
     heading: 90,
-    bearing: 45,
-    range: 100,
+    bearing: 0,
+    range: 0,
     classification: 'neutral' as Classification,
+    remarks: '',
   })
 
   const [selectedTrackId, setSelectedTrackId] = useState<number | null>(null)
@@ -115,12 +117,18 @@ function App() {
 
   const [samForm, setSamForm] = useState({ label: 'SAM1', x: 20, y: -20, range: 40 })
 
+  const [samUIMinimized, setSamUIMinimized] = useState(true)
+
+  const [bulleyeUIMinimized, setBulleyeUIMinimized] = useState(true)
+
   const [tracks, setTracks] = useState<Track[]>([])
   const [sams, setSams] = useState<SAM[]>([])
   const [nextTrackId, setNextTrackId] = useState(1)
   const [nextSamId, setNextSamId] = useState(1)
 
   const [cursorInfo, setCursorInfo] = useState<{ bearing: number; range: number; unit: Unit } | null>(null)
+
+  const [trackHistoryPanel, setTrackHistoryPanel] = useState<{ track: Track | null; visible: boolean }>({ track: null, visible: false })
 
   const mapRef = useRef<HTMLDivElement | null>(null)
   const leafletMapRef = useRef<L.Map | null>(null)
@@ -247,7 +255,7 @@ function App() {
       })
       marker
         .bindPopup(`${t.label} | h=${t.height} ft | ${fromKm(t.rangeKm, unit).toFixed(1)} ${unit}/ ${t.bearing.toFixed(1)}° | ${t.classification}`)
-        .on('click', () => selectTrackToEdit(t))
+        .on('click', () => showTrackHistory(t))
         .addTo(overlay)
     })
   }, [tracks, sams, bulleye, unit])
@@ -300,6 +308,7 @@ function App() {
         x,
         y,
         history: [{ x, y }],
+        remarks: '',
       },
     ])
     setTrackLog((prev) => [
@@ -332,6 +341,7 @@ function App() {
               x: newX,
               y: newY,
               history: [...t.history, { x: newX, y: newY }].slice(-120),
+              remarks: trackForm.remarks || t.remarks,
             }
           : t,
       ),
@@ -357,7 +367,27 @@ function App() {
       bearing: track.bearing,
       range: fromKm(track.rangeKm, unit),
       classification: track.classification,
+      remarks: track.remarks,
     })
+  }
+
+  const deleteTrack = (id: number) => {
+    setTracks((prev) => prev.filter((t) => t.id !== id))
+    setTrackLog((prev) => [
+      {
+        timestamp: new Date().toISOString(),
+        label: `T${id}`,
+        action: 'deleted',
+      },
+      ...prev,
+    ])
+    if (selectedTrackId === id) {
+      setSelectedTrackId(null)
+    }
+  }
+
+  const showTrackHistory = (track: Track) => {
+    setTrackHistoryPanel({ track, visible: true })
   }
 
   const addSAM = () => {
@@ -413,36 +443,19 @@ function App() {
       <div className="layout">
         <aside className="panel">
           <section className="panel-block">
-            <h2>Bullseye gps coords</h2>
-            <label>
-              Name
-              <input value={bulleyeForm.name} onChange={(e) => setBulleyeForm((f) => ({ ...f, name: e.target.value }))} />
-            </label>
-            <label>
-              Lat
-              <input type="number" value={bulleyeForm.lat} onChange={(e) => setBulleyeForm((f) => ({ ...f, lat: Number(e.target.value) }))} />
-            </label>
-            <label>
-              Lng
-              <input type="number" value={bulleyeForm.lng} onChange={(e) => setBulleyeForm((f) => ({ ...f, lng: Number(e.target.value) }))} />
-            </label>
-            <button onClick={updateBulleye}>Set Bullseye</button>
-          </section>
-
-          <section className="panel-block">
             <h2>Add Track</h2>
             <label>
               Track ID
               <input value={trackForm.label} onChange={(e) => setTrackForm((f) => ({ ...f, label: e.target.value }))} />
             </label>
             <label>
-              Classification (Link16 semantics)
+              Classification
               <select value={trackForm.classification} onChange={(e) => setTrackForm((f) => ({ ...f, classification: e.target.value as Classification }))}>
-                <option value="friend">friend</option>
-                <option value="neutral">neutral</option>
-                <option value="suspect">suspect</option>
-                <option value="unknown">unknown</option>
-                <option value="hostile">hostile</option>
+                <option value="Friend">Friend</option>
+                <option value="Neutral">Neutral</option>
+                <option value="Suspect">Suspect</option>
+                <option value="Unknown">Unknown</option>
+                <option value="Hostile">Hostile</option>
               </select>
             </label>
             <label>
@@ -462,16 +475,12 @@ function App() {
               <input type="number" value={trackForm.bearing} onChange={(e) => setTrackForm((f) => ({ ...f, bearing: Number(e.target.value) }))} />
             </label>
             <label>
-              Classification
-              <select value={trackForm.classification} onChange={(e) => setTrackForm((f) => ({ ...f, classification: e.target.value as Classification }))}>
-                <option value="friend">friend</option>
-                <option value="neutral">neutral</option>
-                <option value="hostile">hostile</option>
-              </select>
-            </label>
-            <label>
               Range from Bullseye ({unitLabel})
               <input type="number" value={trackForm.range} onChange={(e) => setTrackForm((f) => ({ ...f, range: Number(e.target.value) }))} />
+            </label>
+            <label>
+              Remarks
+              <input value={trackForm.remarks} onChange={(e) => setTrackForm((f) => ({ ...f, remarks: e.target.value }))} />
             </label>
             <div className="track-buttons">
               <button onClick={addTrack} disabled={selectedTrackId !== null}>Add Track</button>
@@ -480,32 +489,42 @@ function App() {
           </section>
 
           <section className="panel-block">
-            <h2>Add SAM</h2>
-            <label>
-              Name
-              <input value={samForm.label} onChange={(e) => setSamForm((f) => ({ ...f, label: e.target.value }))} />
-            </label>
-            <label>
-              X offset (km east)
-              <input type="number" value={samForm.x} onChange={(e) => setSamForm((f) => ({ ...f, x: Number(e.target.value) }))} />
-            </label>
-            <label>
-              Y offset (km north)
-              <input type="number" value={samForm.y} onChange={(e) => setSamForm((f) => ({ ...f, y: Number(e.target.value) }))} />
-            </label>
-            <label>
-              Range ({unitLabel})
-              <input type="number" value={samForm.range} onChange={(e) => setSamForm((f) => ({ ...f, range: Number(e.target.value) }))} />
-            </label>
-            <button onClick={addSAM}>Add SAM</button>
+            <h2 onClick={() => setSamUIMinimized(!samUIMinimized)} style={{ cursor: 'pointer' }}>
+              Add SAM {samUIMinimized ? '+' : '-'}
+            </h2>
+            {!samUIMinimized && (
+              <>
+                <label>
+                  Name
+                  <input value={samForm.label} onChange={(e) => setSamForm((f) => ({ ...f, label: e.target.value }))} />
+                </label>
+                <label>
+                  X offset (km east)
+                  <input type="number" value={samForm.x} onChange={(e) => setSamForm((f) => ({ ...f, x: Number(e.target.value) }))} />
+                </label>
+                <label>
+                  Y offset (km north)
+                  <input type="number" value={samForm.y} onChange={(e) => setSamForm((f) => ({ ...f, y: Number(e.target.value) }))} />
+                </label>
+                <label>
+                  Range ({unitLabel})
+                  <input type="number" value={samForm.range} onChange={(e) => setSamForm((f) => ({ ...f, range: Number(e.target.value) }))} />
+                </label>
+                <button onClick={addSAM}>Add SAM</button>
+              </>
+            )}
           </section>
 
           <section className="panel-block panel-list">
             <h2>Track List</h2>
             <ul>
               {tracks.map((t) => (
-                <li key={t.id} onClick={() => selectTrackToEdit(t)} className={selectedTrackId === t.id ? 'selected' : ''}>
-                  {t.label}: h={t.height}ft sp={fromKm(t.speedKmh, unit).toFixed(1)} {unitLabel}/h, r={fromKm(t.rangeKm, unit).toFixed(1)} {unitLabel}, b={t.bearing.toFixed(1)}° ({t.classification})
+                <li key={t.id} className={selectedTrackId === t.id ? 'selected' : ''}>
+                  <div onClick={() => selectTrackToEdit(t)} style={{ cursor: 'pointer' }}>
+                    {t.label}: h={t.height}ft sp={fromKm(t.speedKmh, unit).toFixed(1)} {unitLabel}/h, r={fromKm(t.rangeKm, unit).toFixed(1)} {unitLabel}, b={t.bearing.toFixed(1)}° ({t.classification})
+                    {t.remarks && <div>Remarks: {t.remarks}</div>}
+                  </div>
+                  <button onClick={() => deleteTrack(t.id)} style={{ marginLeft: '10px', fontSize: '0.8rem' }}>Delete</button>
                 </li>
               ))}
             </ul>
@@ -532,11 +551,59 @@ function App() {
               ))}
             </ul>
           </section>
+
+          <section className="panel-block">
+            <h2 onClick={() => setBulleyeUIMinimized(!bulleyeUIMinimized)} style={{ cursor: 'pointer' }}>
+              Bullseye gps coords {bulleyeUIMinimized ? '+' : '-'}
+            </h2>
+            {!bulleyeUIMinimized && (
+              <>
+                <label>
+                  Name
+                  <input value={bulleyeForm.name} onChange={(e) => setBulleyeForm((f) => ({ ...f, name: e.target.value }))} />
+                </label>
+                <label>
+                  Lat
+                  <input type="number" value={bulleyeForm.lat} onChange={(e) => setBulleyeForm((f) => ({ ...f, lat: Number(e.target.value) }))} />
+                </label>
+                <label>
+                  Lng
+                  <input type="number" value={bulleyeForm.lng} onChange={(e) => setBulleyeForm((f) => ({ ...f, lng: Number(e.target.value) }))} />
+                </label>
+                <button onClick={updateBulleye}>Set Bullseye</button>
+              </>
+            )}
+          </section>
         </aside>
 
         <main className="map-frame">
           <div ref={mapRef} style={{ height: '100%', width: '100%' }} />
         </main>
+
+        {trackHistoryPanel.visible && trackHistoryPanel.track && (
+          <aside className="panel right-panel">
+            <section className="panel-block">
+              <h2>Track History: {trackHistoryPanel.track.label}</h2>
+              <button onClick={() => setTrackHistoryPanel({ track: null, visible: false })}>Close</button>
+              <div>
+                <strong>Current Position:</strong> x={trackHistoryPanel.track.x.toFixed(2)} km, y={trackHistoryPanel.track.y.toFixed(2)} km
+              </div>
+              <div>
+                <strong>Remarks:</strong> {trackHistoryPanel.track.remarks || 'None'}
+              </div>
+              <div>
+                <strong>Updates:</strong>
+                <ul>
+                  {trackLog.filter(entry => entry.label === trackHistoryPanel.track!.label).map((entry, idx) => (
+                    <li key={idx}>
+                      [{new Date(entry.timestamp).toLocaleString()}] {entry.action}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </section>
+          </aside>
+        )}
       </div>
     </div>
   )
