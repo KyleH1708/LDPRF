@@ -78,19 +78,13 @@ const classificationColor = (classification: Classification) => {
 
 const createApp6Symbol = (classification: Classification) => {
   const color = classificationColor(classification)
-  const iconHtml = {
-    Friend: `<svg viewBox="0 0 24 24" width="24" height="24"><circle cx="12" cy="12" r="8" fill="${color}" stroke="#fff" stroke-width="2" /></svg>`,
-    Neutral: `<svg viewBox="0 0 24 24" width="24" height="24"><polygon points="12,4 20,12 12,20 4,12" fill="${color}" stroke="#000" stroke-width="1.5" /></svg>`,
-    Suspect: `<svg viewBox="0 0 24 24" width="24" height="24"><rect x="6" y="6" width="12" height="12" fill="${color}" stroke="#000" stroke-width="1.5" /></svg>`,
-    Unknown: `<svg viewBox="0 0 24 24" width="24" height="24"><circle cx="12" cy="12" r="8" fill="${color}" stroke="#000" stroke-width="1.5" /></svg>`,
-    Hostile: `<svg viewBox="0 0 24 24" width="24" height="24"><polygon points="12,3 20,21 4,21" fill="${color}" stroke="#000" stroke-width="1.5" /></svg>`,
-  }[classification]
+  const html = `<div style="width: 20px; height: 20px; background-color: ${color}; border: 2px solid white; border-radius: 50%; box-shadow: 0 0 4px rgba(0,0,0,0.8);"></div>`
 
   return L.divIcon({
     className: 'app6-symbol',
-    html: iconHtml,
-    iconAnchor: [12, 12],
-    iconSize: [24, 24],
+    html: html,
+    iconAnchor: [10, 10],
+    iconSize: [20, 20],
   })
 }
 
@@ -103,10 +97,10 @@ function App() {
   const [trackForm, setTrackForm] = useState({
     label: 'T1',
     height: 0,
-    speed: 0,
-    heading: 90,
+    speed: 100,
+    heading: 0,
     bearing: 0,
-    range: 0,
+    range: 10,
     classification: 'neutral' as Classification,
     remarks: '',
   })
@@ -133,6 +127,7 @@ function App() {
   const mapRef = useRef<HTMLDivElement | null>(null)
   const leafletMapRef = useRef<L.Map | null>(null)
   const overlayRef = useRef<L.LayerGroup | null>(null)
+  const lastUpdateRef = useRef(Date.now())
 
   useEffect(() => {
     if (!mapRef.current || leafletMapRef.current) return
@@ -245,14 +240,14 @@ function App() {
       }
 
       const current = trackKmToLatLng(bulleye, t.x, t.y)
-      const predDelta = polarToXY(t.speedKmh / 60, t.heading)
+      // Show predicted position 10 seconds ahead
+      const distanceIn10Sec = (t.speedKmh / 3600) * 10
+      const predDelta = polarToXY(t.heading, distanceIn10Sec)
       const predicted = trackKmToLatLng(bulleye, t.x + predDelta.x, t.y + predDelta.y)
 
       L.polyline([current, predicted], { color: '#f80', dashArray: '8,6', weight: 2 }).addTo(overlay)
 
-      const marker = L.marker(current, {
-        icon: createApp6Symbol(t.classification),
-      })
+      const marker = L.marker(current, { icon: createApp6Symbol(t.classification) })
       marker
         .bindPopup(`${t.label} | h=${t.height} ft | ${fromKm(t.rangeKm, unit).toFixed(1)} ${unit}/ ${t.bearing.toFixed(1)}° | ${t.classification}`)
         .on('click', () => showTrackHistory(t))
@@ -262,14 +257,19 @@ function App() {
 
   useEffect(() => {
     const interval = setInterval(() => {
+      const now = Date.now()
+      const deltaTimeMs = now - lastUpdateRef.current
+      const deltaTimeSec = deltaTimeMs / 1000
       setTracks((current) =>
         current.map((t) => {
-          const distanceKm = t.speedKmh / 3600
-          const delta = polarToXY(distanceKm, t.heading)
+          // Speed is in km/h, distance traveled in this interval
+          const distanceKm = (t.speedKmh / 3600) * deltaTimeSec
+          // Calculate movement based on heading (0° = north, 90° = east, etc)
+          const delta = polarToXY(t.heading, distanceKm)
           const nextX = t.x + delta.x
           const nextY = t.y + delta.y
           const rangeKm = Math.sqrt(nextX * nextX + nextY * nextY)
-          const bearing = (Math.atan2(nextX, nextY) * 180) / Math.PI
+          const bearing = ((Math.atan2(nextX, nextY) * 180) / Math.PI + 360) % 360
           const newHistory = [...t.history, { x: nextX, y: nextY }]
           if (newHistory.length > 120) newHistory.shift()
           return {
@@ -277,11 +277,12 @@ function App() {
             x: nextX,
             y: nextY,
             rangeKm,
-            bearing: (bearing + 360) % 360,
+            bearing,
             history: newHistory,
           }
         }),
       )
+      lastUpdateRef.current = now
     }, 1000)
 
     return () => clearInterval(interval)
@@ -289,7 +290,8 @@ function App() {
 
   const addTrack = () => {
     const rangeKm = toKm(trackForm.range, unit)
-    const speedKmh = toKm(trackForm.speed, unit)
+    // Convert knots to km/h (1 knot = 1.852 km/h)
+    const speedKmh = trackForm.speed * 1.852
     const delta = polarToXY(rangeKm, trackForm.bearing)
     const x = delta.x
     const y = delta.y
@@ -326,6 +328,8 @@ function App() {
     if (selectedTrackId === null) return
     const newX = polarToXY(toKm(trackForm.range, unit), trackForm.bearing).x
     const newY = polarToXY(toKm(trackForm.range, unit), trackForm.bearing).y
+    // Convert knots to km/h (1 knot = 1.852 km/h)
+    const speedKmh = trackForm.speed * 1.852
     setTracks((prev) =>
       prev.map((t) =>
         t.id === selectedTrackId
@@ -333,7 +337,7 @@ function App() {
               ...t,
               label: trackForm.label || t.label,
               height: trackForm.height,
-              speedKmh: toKm(trackForm.speed, unit),
+              speedKmh,
               heading: trackForm.heading,
               bearing: trackForm.bearing,
               classification: trackForm.classification,
@@ -362,7 +366,7 @@ function App() {
     setTrackForm({
       label: track.label,
       height: track.height,
-      speed: fromKm(track.speedKmh, unit),
+      speed: track.speedKmh,
       heading: track.heading,
       bearing: track.bearing,
       range: fromKm(track.rangeKm, unit),
@@ -463,12 +467,12 @@ function App() {
               <input type="number" value={trackForm.height} onChange={(e) => setTrackForm((f) => ({ ...f, height: Number(e.target.value) }))} />
             </label>
             <label>
-              Speed ({unitLabel}/h)
-              <input type="number" value={trackForm.speed} onChange={(e) => setTrackForm((f) => ({ ...f, speed: Number(e.target.value) }))} />
+              Speed (knots)
+              <input type="number" value={trackForm.speed} onChange={(e) => setTrackForm((f) => ({ ...f, speed: Math.max(0, Number(e.target.value)) }))} />
             </label>
             <label>
-              Heading (°)
-              <input type="number" value={trackForm.heading} onChange={(e) => setTrackForm((f) => ({ ...f, heading: Number(e.target.value) }))} />
+              Heading (°) [0°=N, 90°=E, 180°=S, 270°=W]
+              <input type="number" min="0" max="359" value={trackForm.heading} onChange={(e) => setTrackForm((f) => ({ ...f, heading: Number(e.target.value) % 360 }))} />
             </label>
             <label>
               Bearing from Bullseye (°)
@@ -521,7 +525,7 @@ function App() {
               {tracks.map((t) => (
                 <li key={t.id} className={selectedTrackId === t.id ? 'selected' : ''}>
                   <div onClick={() => selectTrackToEdit(t)} style={{ cursor: 'pointer' }}>
-                    {t.label}: h={t.height}ft sp={fromKm(t.speedKmh, unit).toFixed(1)} {unitLabel}/h, r={fromKm(t.rangeKm, unit).toFixed(1)} {unitLabel}, b={t.bearing.toFixed(1)}° ({t.classification})
+                    {t.label}: h={t.height}ft sp={(t.speedKmh / 1.852).toFixed(1)} knots, r={fromKm(t.rangeKm, unit).toFixed(1)} {unitLabel}, b={t.bearing.toFixed(1)}° ({t.classification})
                     {t.remarks && <div>Remarks: {t.remarks}</div>}
                   </div>
                   <button onClick={() => deleteTrack(t.id)} style={{ marginLeft: '10px', fontSize: '0.8rem' }}>Delete</button>

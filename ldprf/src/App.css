@@ -12,6 +12,12 @@ body:fullscreen, html:fullscreen {
   padding: 0;
 }
 
+body:fullscreen .map-frame, html:fullscreen .map-frame {
+  padding: 0;
+  border: none;
+  border-radius: 0;
+}
+
 * {
   box-sizing: border-box;
 }
