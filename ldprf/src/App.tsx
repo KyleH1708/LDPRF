@@ -95,9 +95,9 @@ const createApp6Symbol = (classification: Classification) => {
 
 function App() {
   const [unit, setUnit] = useState<Unit>('km')
-  const [bulleye, setBulleye] = useState<Bulleye>({ name: 'BULLSEYE', lat: 28.9658, lng: 47.4452 })
+  const [bulleye, setBulleye] = useState<Bulleye>({ name: 'BULLSEYE', lat: 28.9658, lng: 47.7452 })
 
-  const [bulleyeForm, setBulleyeForm] = useState({ name: 'BULLSEYE', lat: 28.9658, lng: 47.4452 })
+  const [bulleyeForm, setBulleyeForm] = useState({ name: 'BULLSEYE', lat: 28.9658, lng: 47.7452 })
 
   const [trackForm, setTrackForm] = useState({
     label: 'T1',
