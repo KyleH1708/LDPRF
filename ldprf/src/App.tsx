@@ -2,6 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import './App.css'
+import { createClient } from '@supabase/supabase-js'
+
+// Initialize Supabase
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+const supabase = supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey) : null
 
 type Unit = 'km' | 'nm'
 
@@ -265,39 +271,116 @@ function App() {
   }, [tracks, sams, bulleye, unit])
 
   useEffect(() => {
+    if (!supabase) {
+      console.log('Supabase not configured. Using local state only.')
+      return
+    }
+
+    // Load initial tracks from database
+    const loadTracks = async () => {
+      const { data, error } = await supabase.from('tracks').select('*')
+      if (error) {
+        console.error('Error loading tracks:', error)
+        return
+      }
+      if (data) {
+        const parsedTracks: Track[] = data.map((track: any) => ({
+          ...track,
+          history: Array.isArray(track.history) ? track.history : JSON.parse(track.history || '[]'),
+        }))
+        setTracks(parsedTracks)
+        // Update nextTrackId to avoid conflicts
+        const maxId = Math.max(...parsedTracks.map((t) => t.id), 0)
+        setNextTrackId(maxId + 1)
+      }
+    }
+
+    loadTracks()
+
+    // Set up real-time subscription
+    const subscription = supabase
+      .channel('tracks-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tracks' }, (payload: any) => {
+        if (payload.eventType === 'INSERT') {
+          const newTrack = {
+            ...payload.new,
+            history: Array.isArray(payload.new.history) ? payload.new.history : JSON.parse(payload.new.history || '[]'),
+          }
+          setTracks((prev) => [...prev, newTrack])
+        } else if (payload.eventType === 'UPDATE') {
+          const updatedTrack = {
+            ...payload.new,
+            history: Array.isArray(payload.new.history) ? payload.new.history : JSON.parse(payload.new.history || '[]'),
+          }
+          setTracks((prev) => prev.map((t) => (t.id === updatedTrack.id ? updatedTrack : t)))
+        } else if (payload.eventType === 'DELETE') {
+          setTracks((prev) => prev.filter((t) => t.id !== payload.old.id))
+        }
+      })
+      .subscribe()
+
+    return () => {
+      subscription.unsubscribe()
+    }
+  }, [])
+
+  useEffect(() => {
+    // Auto-update track positions
     const interval = setInterval(() => {
       const now = Date.now()
       const deltaTimeMs = now - lastUpdateRef.current
       const deltaTimeSec = deltaTimeMs / 1000
-      setTracks((current) =>
-        current.map((t) => {
-          // Speed is in km/h, distance traveled in this interval
-          const distanceKm = (t.speedKmh / 3600) * deltaTimeSec
-          // Calculate movement based on heading (0° = north, 90° = east, etc)
-          const delta = polarToXY(t.heading, distanceKm)
-          const nextX = t.x + delta.x
-          const nextY = t.y + delta.y
-          const rangeKm = Math.sqrt(nextX * nextX + nextY * nextY)
-          const bearing = ((Math.atan2(nextX, nextY) * 180) / Math.PI + 360) % 360
-          const newHistory = [...t.history, { x: nextX, y: nextY }]
-          if (newHistory.length > 120) newHistory.shift()
-          return {
-            ...t,
-            x: nextX,
-            y: nextY,
-            rangeKm,
-            bearing,
-            history: newHistory,
-          }
-        }),
-      )
+      
+      const updatedTracks = tracks.map((t) => {
+        // Speed is in km/h, distance traveled in this interval
+        const distanceKm = (t.speedKmh / 3600) * deltaTimeSec
+        // Calculate movement based on heading (0° = north, 90° = east, etc)
+        const delta = polarToXY(t.heading, distanceKm)
+        const nextX = t.x + delta.x
+        const nextY = t.y + delta.y
+        const rangeKm = Math.sqrt(nextX * nextX + nextY * nextY)
+        const bearing = ((Math.atan2(nextX, nextY) * 180) / Math.PI + 360) % 360
+        const newHistory = [...t.history, { x: nextX, y: nextY }]
+        if (newHistory.length > 120) newHistory.shift()
+        return {
+          ...t,
+          x: nextX,
+          y: nextY,
+          rangeKm,
+          bearing,
+          history: newHistory,
+        }
+      })
+
+      // Only update if tracks have moved
+      if (JSON.stringify(updatedTracks) !== JSON.stringify(tracks)) {
+        setTracks(updatedTracks)
+        
+        // Update position in database if Supabase is configured
+        if (supabase) {
+          updatedTracks.forEach(async (t) => {
+            await supabase
+              .from('tracks')
+              .update({
+                x: t.x,
+                y: t.y,
+                rangeKm: t.rangeKm,
+                bearing: t.bearing,
+                history: JSON.stringify(t.history),
+              })
+              .eq('id', t.id)
+          })
+        }
+      }
+
       lastUpdateRef.current = now
     }, 1000)
 
     return () => clearInterval(interval)
-  }, [])
+  }, [tracks])
 
-  const addTrack = () => {
+
+  const addTrack = async () => {
     const rangeKm = toKm(trackForm.range, unit)
     // Convert knots to km/h (1 knot = 1.852 km/h)
     const speedKmh = trackForm.speed * 1.852
@@ -305,32 +388,48 @@ function App() {
     const x = delta.x
     const y = delta.y
 
-    setTracks((prev) => [
-      ...prev,
-      {
-        id: nextTrackId,
-        label: trackForm.label || `T${nextTrackId}`,
-        height: trackForm.height,
-        speedKmh,
-        heading: trackForm.heading,
-        bearing: trackForm.bearing,
-        classification: trackForm.classification,
-        rangeKm,
-        x,
-        y,
-        history: [{ x, y }],
-        remarks: trackForm.remarks,
-      },
-    ])
+    const newTrack = {
+      label: trackForm.label || `T${nextTrackId}`,
+      classification: trackForm.classification,
+      height: trackForm.height,
+      speedKmh,
+      heading: trackForm.heading,
+      bearing: trackForm.bearing,
+      rangeKm,
+      x,
+      y,
+      history: JSON.stringify([{ x, y }]),
+      remarks: trackForm.remarks,
+    }
+
+    if (supabase) {
+      const { error } = await supabase.from('tracks').insert([newTrack])
+      if (error) {
+        console.error('Error adding track:', error)
+        return
+      }
+    } else {
+      // Fallback: add to local state
+      setTracks((prev) => [
+        ...prev,
+        {
+          id: nextTrackId,
+          ...newTrack,
+          history: [{ x, y }],
+        },
+      ])
+      setNextTrackId((v) => v + 1)
+    }
+
     setTrackLog((prev) => [
       {
         timestamp: new Date().toISOString(),
-        label: trackForm.label || `T${nextTrackId}`,
+        label: newTrack.label,
         action: 'added',
       },
       ...prev,
     ])
-    setNextTrackId((v) => v + 1)
+
     // Reset form after adding
     setTrackForm({
       label: 'T1',
@@ -344,7 +443,7 @@ function App() {
     })
   }
 
-  const updateTrack = () => {
+  const updateTrack = async () => {
     if (selectedTrackId === null) return
     console.log('Updating track', selectedTrackId, 'with form data:', trackForm)
     // Convert knots to km/h (1 knot = 1.852 km/h)
@@ -353,33 +452,47 @@ function App() {
     const delta = polarToXY(trackForm.bearing, rangeKm)
     const x = delta.x
     const y = delta.y
-    setTracks((prev) => {
-      const updated = prev.map((t) =>
-        t.id === selectedTrackId
-          ? {
-              ...t,
-              label: trackForm.label || t.label,
-              height: trackForm.height,
-              speedKmh,
-              heading: trackForm.heading,
-              bearing: trackForm.bearing,
-              rangeKm,
-              x,
-              y,
-              classification: trackForm.classification,
-              remarks: trackForm.remarks || t.remarks,
-              history: [{ x, y }], // Reset history on position change
-            }
-          : t,
-      )
-      const updatedTrack = updated.find(t => t.id === selectedTrackId)
-      console.log('Updated track result:', updatedTrack)
-      return updated
-    })
+
+    const updatedData = {
+      label: trackForm.label,
+      height: trackForm.height,
+      speedKmh,
+      heading: trackForm.heading,
+      bearing: trackForm.bearing,
+      rangeKm,
+      x,
+      y,
+      classification: trackForm.classification,
+      remarks: trackForm.remarks,
+      history: JSON.stringify([{ x, y }]),
+    }
+
+    if (supabase) {
+      const { error } = await supabase.from('tracks').update(updatedData).eq('id', selectedTrackId)
+      if (error) {
+        console.error('Error updating track:', error)
+        return
+      }
+    } else {
+      // Fallback: update local state
+      setTracks((prev) => {
+        const updated = prev.map((t) =>
+          t.id === selectedTrackId
+            ? {
+                ...t,
+                ...updatedData,
+                history: [{ x, y }],
+              }
+            : t,
+        )
+        return updated
+      })
+    }
+
     setTrackLog((prev) => [
       {
         timestamp: new Date().toISOString(),
-        label: trackForm.label || `T${selectedTrackId}`,
+        label: trackForm.label,
         action: 'updated',
       },
       ...prev,
@@ -418,8 +531,18 @@ function App() {
     })
   }
 
-  const deleteTrack = (id: number) => {
-    setTracks((prev) => prev.filter((t) => t.id !== id))
+  const deleteTrack = async (id: number) => {
+    if (supabase) {
+      const { error } = await supabase.from('tracks').delete().eq('id', id)
+      if (error) {
+        console.error('Error deleting track:', error)
+        return
+      }
+    } else {
+      // Fallback: delete from local state
+      setTracks((prev) => prev.filter((t) => t.id !== id))
+    }
+
     setTrackLog((prev) => [
       {
         timestamp: new Date().toISOString(),
