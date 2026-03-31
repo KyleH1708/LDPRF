@@ -5,7 +5,7 @@ import './App.css'
 
 type Unit = 'km' | 'nm'
 
-type Classification = 'friend' | 'neutral' | 'hostile' | 'suspect' | 'unknown'
+type Classification = 'Friend' | 'Neutral' | 'Hostile' | 'Suspect' | 'Unknown'
 
 type Track = {
   id: number
@@ -62,15 +62,15 @@ const latLngToTrack = (bull: Bulleye, lat: number, lng: number) => {
 
 const classificationColor = (classification: Classification) => {
   switch (classification) {
-    case 'friend':
+    case 'Friend':
       return '#0af'
-    case 'neutral':
+    case 'Neutral':
       return '#0f0' // green for neutral
-    case 'suspect':
+    case 'Suspect':
       return '#ffa500' // orange
-    case 'unknown':
+    case 'Unknown':
       return '#ffca28' // yellow
-    case 'hostile':
+    case 'Hostile':
       return '#f00'
   }
 }
@@ -78,11 +78,11 @@ const classificationColor = (classification: Classification) => {
 const createApp6Symbol = (classification: Classification) => {
   const color = classificationColor(classification)
   const iconHtml = {
-    friend: `<svg viewBox="0 0 24 24" width="24" height="24"><circle cx="12" cy="12" r="8" fill="${color}" stroke="#fff" stroke-width="2" /></svg>`,
-    neutral: `<svg viewBox="0 0 24 24" width="24" height="24"><polygon points="12,4 20,12 12,20 4,12" fill="${color}" stroke="#000" stroke-width="1.5" /></svg>`,
-    suspect: `<svg viewBox="0 0 24 24" width="24" height="24"><rect x="6" y="6" width="12" height="12" fill="${color}" stroke="#000" stroke-width="1.5" /></svg>`,
-    unknown: `<svg viewBox="0 0 24 24" width="24" height="24"><circle cx="12" cy="12" r="8" fill="${color}" stroke="#000" stroke-width="1.5" /></svg>`,
-    hostile: `<svg viewBox="0 0 24 24" width="24" height="24"><polygon points="12,3 20,21 4,21" fill="${color}" stroke="#000" stroke-width="1.5" /></svg>`,
+    Friend: `<svg viewBox="0 0 24 24" width="24" height="24"><circle cx="12" cy="12" r="8" fill="${color}" stroke="#fff" stroke-width="2" /></svg>`,
+    Neutral: `<svg viewBox="0 0 24 24" width="24" height="24"><polygon points="12,4 20,12 12,20 4,12" fill="${color}" stroke="#000" stroke-width="1.5" /></svg>`,
+    Suspect: `<svg viewBox="0 0 24 24" width="24" height="24"><rect x="6" y="6" width="12" height="12" fill="${color}" stroke="#000" stroke-width="1.5" /></svg>`,
+    Unknown: `<svg viewBox="0 0 24 24" width="24" height="24"><circle cx="12" cy="12" r="8" fill="${color}" stroke="#000" stroke-width="1.5" /></svg>`,
+    Hostile: `<svg viewBox="0 0 24 24" width="24" height="24"><polygon points="12,3 20,21 4,21" fill="${color}" stroke="#000" stroke-width="1.5" /></svg>`,
   }[classification]
 
   return L.divIcon({
